@@ -31,8 +31,8 @@
 let employees=[],records=new Map(),current=null;
 let sb=null, signedUser=null;
 // CONFIGURE THESE TWO PUBLIC VALUES IN CODE. NEVER ADD A SECRET / SERVICE ROLE KEY.
-const SUPABASE_URL = 'https://lzhitidztxedstnoeqcd.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_0YJ5EQSWe0y1gKvdbqcVPg_B9i3Ylq2';
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'YOUR_PUBLISHABLE_OR_ANON_KEY';
 function cloudMsg(t){msg(t); console.info('[Cloud]',t)}
 function requireCloud(){if(!sb||!signedUser){cloudMsg('Cloud session unavailable. Reload and sign in to continue.');return false}return true}
 async function configureCloud(){
