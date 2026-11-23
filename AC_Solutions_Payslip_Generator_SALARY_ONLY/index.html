@@ -10,13 +10,6 @@
 </style></head>
 <body><div class="wrap">
 <h1 class="page-title">A&C Solutions — Payslip Generator</h1>
-<section class="panel no-print"><h3>Supabase Cloud Storage</h3>
-<p class="muted">Configure your Supabase Project URL and <b>publishable / anon key</b> (never a service_role or secret key). Sign in to load and save your records. Each signed-in account has its own private records.</p>
-<div class="grid"><div><label>Supabase Project URL</label><input id="sbUrl" placeholder="https://xxxxx.supabase.co"></div><div><label>Publishable / anon key</label><input id="sbKey" type="password" placeholder="sb_publishable_... or anon key"></div></div>
-<button type="button" onclick="configureCloud()">Connect Supabase</button>
-<div class="grid"><div><label>Email</label><input id="authEmail" type="email" autocomplete="username"></div><div><label>Password</label><input id="authPassword" type="password" autocomplete="current-password"></div></div>
-<button type="button" onclick="signIn()">Sign in</button><button type="button" onclick="signUp()">Create account</button><button type="button" onclick="signOut()">Sign out</button><button type="button" onclick="refreshCloud()">Reload cloud data</button>
-<p id="cloudStatus" role="status" class="muted">Not connected. Payroll editing is disabled until signed in.</p></section>
 <section class="panel no-print"><h3>Employee and salary details</h3><div class="grid">
 <div><label>Employee</label><select id="emp"><option value="">Upload employee Excel first</option></select></div>
 <div><label>Pay month</label><input id="month" type="month"></div>
@@ -24,7 +17,7 @@
 <div><label>Professional Tax (₹)</label><input id="pt" type="number" min="0" value="150"></div></div>
 <button onclick="document.getElementById('file').click()">Upload employee Excel</button><input id="file" class="hidden" type="file" accept=".xlsx,.xls,.csv">
 <button onclick="template()">Download employee template</button><button onclick="generate()">Generate / Update Payslip</button>
-<div id="status" class="muted" role="status"></div><p class="muted"><b>Cloud auto-save:</b> Employee imports and generated payroll are saved to Supabase for the signed-in user. Wait for the success message before closing the page. Export payroll Excel regularly as a backup.</p>
+<div id="status" class="muted" role="status"></div><p class="muted"><b>Cloud auto-save:</b> Employee imports and generated payroll are saved to Supabase automatically after secure sign-in. Wait for the success message before closing the page. Export payroll Excel regularly as a backup.</p>
 <p class="muted"><b>Configured company calculation:</b> Basic = 50% of original salary; HRA = 20%; Other Allowance = 30%; each PF share = 12% of Basic. For salary ≤ ₹12,000, employee PF is added to gross and combined PF plus PT are deducted. For salary above ₹12,000, PT is added to gross and combined PF plus PT are deducted. Verify statutory payroll treatment before production use.</p></section>
 <section class="panel no-print"><button onclick="window.print()">Print / Save Payslip PDF</button><button onclick="exportSlip()">Download Payslip Excel</button><button onclick="exportPayroll()">Export Payroll Excel</button><p class="muted">When saving as PDF, turn off <b>Headers and footers</b> in the browser print settings to remove the date, time and page title.</p></section>
 <section class="slip" id="slip"><div class="yellow"><h2>ANIL &amp; CHARAN SOLUTIONS PRIVATE LIMITED</h2><b>PAYSLIP</b></div><div class="peach" id="monthTitle">PAYSLIP —</div>
@@ -37,17 +30,34 @@
 <script>
 let employees=[],records=new Map(),current=null;
 let sb=null, signedUser=null;
-const CONFIG_KEY='ac_supabase_public_config_v1';
-function cloudMsg(t){document.getElementById('cloudStatus').textContent=t}
-function requireCloud(){if(!sb||!signedUser){cloudMsg('Sign in to Supabase before importing employees or saving payroll.');return false}return true}
-function configureCloud(){
- const url=document.getElementById('sbUrl').value.trim(),key=document.getElementById('sbKey').value.trim();
- if(!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(url)||!key){cloudMsg('Enter a valid Supabase project URL and publishable/anon key.');return}
- try{sb=window.supabase.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true}});localStorage.setItem(CONFIG_KEY,JSON.stringify({url,key}));signedUser=null;employees=[];records=new Map();populateEmployees();renderRegister();sb.auth.onAuthStateChange((_event,session)=>{signedUser=session?.user||null;cloudMsg(signedUser?'Signed in as '+signedUser.email:'Not signed in');});sb.auth.getUser().then(({data,error})=>{if(error)throw error;if(data.user){signedUser=data.user;refreshCloud()}else cloudMsg('Connected. Sign in or create an account.')}).catch(e=>cloudMsg('Connection error: '+e.message))}catch(e){cloudMsg('Configuration error: '+e.message)}
+// CONFIGURE THESE TWO PUBLIC VALUES IN CODE. NEVER ADD A SECRET / SERVICE ROLE KEY.
+const SUPABASE_URL = 'https://lzhitidztxedstnoeqcd.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_0YJ5EQSWe0y1gKvdbqcVPg_B9i3Ylq2';
+function cloudMsg(t){msg(t); console.info('[Cloud]',t)}
+function requireCloud(){if(!sb||!signedUser){cloudMsg('Cloud session unavailable. Reload and sign in to continue.');return false}return true}
+async function configureCloud(){
+ const url=SUPABASE_URL.trim(),key=SUPABASE_PUBLISHABLE_KEY.trim();
+ if(!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(url)||key.startsWith('YOUR_')){
+   cloudMsg('Set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in index.html before use.');return;
+ }
+ try {
+   sb=window.supabase.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true}});
+   const {data,error}=await sb.auth.getUser();
+   if(error && !/session missing/i.test(error.message))console.warn(error.message);
+   signedUser=data?.user||null;
+   if(!signedUser){
+     // Credentials are entered only when necessary; they are NEVER stored in source code.
+     const email=window.prompt('AC Solutions secure cloud login — email:');
+     if(!email){cloudMsg('Sign-in cancelled. Reload to try again.');return}
+     const password=window.prompt('Supabase password for '+email+':');
+     if(!password){cloudMsg('Sign-in cancelled. Reload to try again.');return}
+     const result=await sb.auth.signInWithPassword({email:email.trim(),password});
+     if(result.error){cloudMsg('Sign-in failed: '+result.error.message+' (Create an account in Supabase first.)');return}
+     signedUser=result.data.user;
+   }
+   await refreshCloud();
+ }catch(e){cloudMsg('Cloud connection failed: '+e.message)}
 }
-async function signIn(){if(!sb)return cloudMsg('Connect Supabase first.');const {data,error}=await sb.auth.signInWithPassword({email:document.getElementById('authEmail').value.trim(),password:document.getElementById('authPassword').value});if(error)return cloudMsg('Sign-in failed: '+error.message);signedUser=data.user;await refreshCloud()}
-async function signUp(){if(!sb)return cloudMsg('Connect Supabase first.');const {data,error}=await sb.auth.signUp({email:document.getElementById('authEmail').value.trim(),password:document.getElementById('authPassword').value});if(error)return cloudMsg('Sign-up failed: '+error.message);if(data.session){signedUser=data.user;await refreshCloud()}else cloudMsg('Account created. Check your email to confirm your address, then sign in.')}
-async function signOut(){if(sb)await sb.auth.signOut();signedUser=null;employees=[];records=new Map();current=null;populateEmployees();renderRegister();cloudMsg('Signed out. Cloud records are not displayed.')}
 async function refreshCloud(){
  if(!requireCloud())return;
  const [eResult,pResult]=await Promise.all([sb.from('employees').select('employee_id,data').order('employee_id'),sb.from('payroll').select('employee_id,pay_month,data').order('pay_month',{ascending:false})]);
@@ -75,14 +85,14 @@ function populateEmployees(){
 }
 const money=n=>(Number(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 function template(){const rows=[{EmployeeID:'AC001',EmployeeName:'Sample Employee',Designation:'Process Associate',Department:'Operations',JoiningDate:'01-01-2026',BankAccount:'XXXX1234',UAN:'100000000000',PAN:'ABCDE1234F'}];const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),'Employees');XLSX.writeFile(wb,'AC_Employee_Details_Template.xlsx')}
-document.getElementById('file').onchange=async e=>{if(!requireCloud())return;try{const wb=XLSX.read(await e.target.files[0].arrayBuffer());const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});const imported=rows.map(r=>({id:String(r.EmployeeID||r['Employee ID']||''),name:r.EmployeeName||r['Employee Name']||'',designation:r.Designation||'',department:r.Department||'',joining:r.JoiningDate||'',bank:r.BankAccount||'',uan:r.UAN||'',pan:r.PAN||''}));if(await saveEmployeesCloud(imported)){await refreshCloud();msg(imported.length+' employee(s) saved to Supabase')}else msg('Employee import was not saved. See cloud status.')}catch(err){msg('Could not read file. Please use the employee template.')}}
+document.getElementById('file').onchange=async e=>{if(!requireCloud())return;try{const wb=XLSX.read(await e.target.files[0].arrayBuffer());const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});const imported=rows.map(r=>({id:String(r.EmployeeID||r['Employee ID']||''),name:r.EmployeeName||r['Employee Name']||'',designation:r.Designation||'',department:r.Department||'',joining:r.JoiningDate||'',bank:r.BankAccount||'',uan:r.UAN||'',pan:r.PAN||''}));if(await saveEmployeesCloud(imported)){await refreshCloud();msg(imported.length+' employee(s) saved to Supabase')}else msg('Employee import was not saved. See status above.')}catch(err){msg('Could not read file. Please use the employee template.')}}
 function msg(t){document.getElementById('status').textContent=t}
 function words(n){if(n===0)return'Zero Rupees Only';let ones=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'],tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];function w(x){if(x<20)return ones[x];if(x<100)return tens[Math.floor(x/10)]+(x%10?' '+ones[x%10]:'');if(x<1000)return ones[Math.floor(x/100)]+' Hundred'+(x%100?' '+w(x%100):'');return''}let x=Math.round(n),a=[];for(const [v,l] of [[10000000,'Crore'],[100000,'Lakh'],[1000,'Thousand'],[1,'']])if(x>=v){a.push(w(Math.floor(x/v))+(l?' '+l:''));x%=v}return a.join(' ')+' Rupees Only'}
 async function generate(){if(!requireCloud())return;let ix=document.getElementById('emp').value,month=document.getElementById('month').value,salary=+document.getElementById('salary').value,pt=+document.getElementById('pt').value||0;if(ix===''||!month||salary<=0){msg('Select an employee, month and valid salary.');return}
 const e=employees[+ix],basic=salary*.5,hra=salary*.2,allowance=salary*.3,pfEach=basic*.12,pfTotal=pfEach*2,low=salary<=12000;
 const adjustment=low?pfEach:pt,gross=salary+adjustment,deductions=pfTotal+pt,net=gross-deductions;
 current={...e,month,originalSalary:salary,basic,hra,otherAllowance:allowance,adjustment,gross,pf:pfTotal,professionalTax:pt,deductions,netPay:net,pfTreatment:'Combined PF and Professional Tax deducted from gross'};
-const key=(e.id||e.name).trim().toLowerCase()+'|'+month;const replacing=records.has(key);if(!await savePayrollCloud(current)){msg('Payslip was NOT saved to cloud. Check cloud status.');return}records.set(key,current);
+const key=(e.id||e.name).trim().toLowerCase()+'|'+month;const replacing=records.has(key);if(!await savePayrollCloud(current)){msg('Payslip was NOT saved to cloud. Check status above.');return}records.set(key,current);
 const fields={name:e.name,eid:e.id,designation:e.designation,department:e.department,joining:e.joining,bank:e.bank,uan:e.uan,pan:e.pan,basic,hra,allowance,adjustment,gross,pf:pfTotal,tax:pt,net:'₹'+money(net),words:words(net)};
 for(const [k,v] of Object.entries(fields))document.getElementById(k).textContent=['basic','hra','allowance','adjustment','gross','pf','tax'].includes(k)?money(v):(v||'—');
 document.getElementById('monthTitle').textContent='PAYSLIP — '+month;renderRegister();msg(replacing?'Existing employee/month payroll record updated.':'Payslip generated and added to payroll register.')}
@@ -90,5 +100,5 @@ function renderRegister(){const filter=document.getElementById('filter').value;c
 function loadRecord(r){current=r;let map={name:r.name,eid:r.id,designation:r.designation,department:r.department,joining:r.joining,bank:r.bank,uan:r.uan,pan:r.pan,basic:r.basic,hra:r.hra,allowance:r.otherAllowance,adjustment:r.adjustment,gross:r.gross,pf:r.pf,tax:r.professionalTax,net:'₹'+money(r.netPay),words:words(r.netPay)};for(let [k,v] of Object.entries(map))document.getElementById(k).textContent=['basic','hra','allowance','adjustment','gross','pf','tax'].includes(k)?money(v):(v||'—');document.getElementById('monthTitle').textContent='PAYSLIP — '+r.month;document.getElementById('salary').value=r.originalSalary;document.getElementById('month').value=r.month;document.getElementById('pt').value=r.professionalTax;const employeeIndex=employees.findIndex(e=>String(e.id)===String(r.id));document.getElementById('emp').value=employeeIndex>=0?String(employeeIndex):'';msg('Showing saved payslip for '+r.name+' — '+r.month);document.getElementById('slip').scrollIntoView({behavior:'smooth',block:'start'});}
 function exportSlip(){if(!current){msg('Generate or view a payslip first.');return}const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet([current]),'Payslip');XLSX.writeFile(wb,'Payslip_'+(current.id||'Employee')+'_'+current.month+'.xlsx')}
 function exportPayroll(){if(!records.size){msg('Generate at least one payslip first.');return}const wb=XLSX.utils.book_new(),groups={};for(const r of records.values())(groups[r.month]??=[]).push(r);Object.keys(groups).sort().forEach(m=>XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(groups[m]),m.replace(/[\\/?*\\[\\]:]/g,'-').slice(0,31)));XLSX.writeFile(wb,'AC_Payroll.xlsx');msg('Payroll exported with '+Object.keys(groups).length+' monthly worksheet(s).')}
-try{const cfg=JSON.parse(localStorage.getItem(CONFIG_KEY)||'null');if(cfg){document.getElementById('sbUrl').value=cfg.url;document.getElementById('sbKey').value=cfg.key;configureCloud()}}catch(e){cloudMsg('Could not restore Supabase connection settings.')}
+configureCloud();
 </script></body></html>
